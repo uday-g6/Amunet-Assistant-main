@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat with Amunet</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        .chat-container {
+            width: 100%;
+            max-width: 600px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+        .messages {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .message {
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+        .user-message {
+            background-color: #007bff;
+            color: #fff;
+            align-self: flex-end;
+        }
+        .bot-message {
+            background-color: #f1f1f1;
+            color: #333;
+        }
+        .input-container {
+            display: flex;
+            margin-top: 10px;
+        }
+        .input-container input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .input-container button {
+            padding: 10px;
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            margin-left: 10px;
+            cursor: pointer;
+        }
+        .input-container button:disabled {
+            background-color: #ccc;
+        }
+        .control-buttons {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <h2>Hello, {{ name }}! Let's chat.</h2>
+        <ul class="messages" id="messages"></ul>
+        <div class="input-container" id="text-input-container">
+            <input type="text" id="user-input" placeholder="Type your message here...">
+            <button id="send-btn" onclick="sendMessage()">Send</button>
+        </div>
+        <div class="input-container" id="voice-input-container" style="display: none;">
+            <button id="voice-btn" onclick="startRecognition()">🎤 Start Voice Chat</button>
+        </div>
+        <div class="control-buttons">
+            <button id="stop-btn" onclick="stopSpeech()">Stop</button>
+        </div>
+    </div>
+    <script>
+        const interactionType = "{{ interaction_type }}";
+        const messagesEl = document.getElementById('messages');
+        const userInputEl = document.getElementById('user-input');
+        const sendBtnEl = document.getElementById('send-btn');
+        const voiceBtnEl = document.getElementById('voice-btn');
+        const textInputContainer = document.getElementById('text-input-container');
+        const voiceInputContainer = document.getElementById('voice-input-container');
+        const stopBtnEl = document.getElementById('stop-btn');
+        let recognizing = false;
+        let recognition;
+        let synth = window.speechSynthesis;
+        let redirectTimeout;
+
+        // Show relevant input container based on interaction type
+        if (interactionType === 'voice') {
+            textInputContainer.style.display = 'none';
+            voiceInputContainer.style.display = 'flex';
+        } else {
+            textInputContainer.style.display = 'flex';
+            voiceInputContainer.style.display = 'none';
+        }
+
+        // Initialize speech recognition
+        if ('webkitSpeechRecognition' in window) {
+            recognition = new webkitSpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = function() {
+                recognizing = true;
+                voiceBtnEl.textContent = '🎤 Listening...';
+            };
+
+            recognition.onend = function() {
+                recognizing = false;
+                voiceBtnEl.textContent = '🎤 Start Voice Chat';
+            };
+
+            recognition.onresult = function(event) {
+                const transcript = event.results[0][0].transcript.trim();
+                userInputEl.value = transcript;
+                sendMessage();
+            };
+
+            recognition.onerror = function(event) {
+                console.error('Speech recognition error', event);
+                recognizing = false;
+                voiceBtnEl.textContent = '🎤 Start Voice Chat';
+            };
+        }
+
+        function startRecognition() {
+            if (recognizing) {
+                recognition.stop();
+                return;
+            }
+            recognition.start();
+        }
+
+        function sendMessage() {
+            const userMessage = userInputEl.value.trim();
+            if (userMessage === '') return;
+
+            addMessage(userMessage, 'user-message');
+            userInputEl.value = '';
+            sendBtnEl.disabled = true;
+
+            fetch('/get_response', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ message: userMessage })
+            })
+            .then(response => response.json())
+            .then(data => {
+                addMessage(data.response, 'bot-message');
+                sendBtnEl.disabled = false;
+                userInputEl.focus();
+                speak(data.response);
+
+                // Handle redirection after exit or bye
+                if (data.redirect_after) {
+                    clearTimeout(redirectTimeout);
+                    redirectTimeout = setTimeout(() => {
+                        window.location.href = '/';
+                    }, 10000); // Redirect after 10 seconds
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                sendBtnEl.disabled = false;
+            });
+        }
+
+        function addMessage(text, className) {
+            const messageEl = document.createElement('li');
+            messageEl.textContent = text;
+            messageEl.className = `message ${className}`;
+            messagesEl.appendChild(messageEl);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        function speak(text) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            synth.speak(utterance);
+        }
+
+        function stopSpeech() {
+            if (synth.speaking) {
+                synth.cancel();
+            }
+        }
+
+        userInputEl.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>
